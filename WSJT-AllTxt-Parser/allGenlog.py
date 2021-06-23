@@ -21,140 +21,144 @@ freqMap = {
 	'50': '6m'
 }
 
-DEF_LOG_PGM="WSJT-X";
-DEF_QSL_MSG="Thanks for QSO";
+DEF_LOG_PGM="IngeniiLogger"
+DEF_QSL_MSG="Thanks for QSO"
 
 ##################
 ##  M A I N 
 ##################
 
 def main(args):
-	global callRegex;
-	global cqRegex;
-	global QSOs;
-	global gridMap;
-	global station;
-	global txPower;
-	station = args[1];
-	fileList = args[2:];
-	QSOs = { };
-	gridMap = {};
-	txPower = '%i' % (os.environ['TXPWR'] if 'TXPWR' in os.environ else 35);
+	global callRegex
+	global cqRegex
+	global QSOs
+	global gridMap
+	global station
+	global txPower
+	global loggerId
+	station = args[1]
+	fileList = args[2:]
+	QSOs = { }
+	gridMap = {}
+	txPower = '%i' % (os.environ['TXPWR'] if 'TXPWR' in os.environ else 35)
+	loggerId = os.environ['LOG_PGM'] if 'LOG_PGM' in os.environ else DEF_LOG_PGM
 
 	# compile the regex to extract messages for <callsign>
 	# message example:  210426_022845     7.074 Tx FT8      0  0.0 1321 KP4DQC KI5GFU EL09
-	callRegex = re.compile('.*\\b'+station+'\\b.*',re.IGNORECASE);
+	callRegex = re.compile('.*\\b'+station+'\\b.*',re.IGNORECASE)
 	# define cq match to extract my current gridsquare
 	# std:			CQ KP4DQC FK67
 	# contest: 	CQ POTA KG4WZZ EM74
-	cqRegex = re.compile('.*CQ\s.*\\b([A-Z0-9]+)\s+([A-Z]{2}[0-9]{2})$',re.IGNORECASE);
+	cqRegex = re.compile('.*CQ\s.*\\b([A-Z0-9]+)\s+([A-Z]{2}[0-9]{2})$',re.IGNORECASE)
 
 	# process each file
 	for fileName in fileList:
-		getCallRecords(station,fileName);
+		getCallRecords(station,fileName)
 
 
 def getCallRecords(callsign,fileName):
-	callHits = [];
-	qsoList = [];
-	qsoBuffer = {};
-	print("\n***** ",fileName," *****\n\tGet ",callsign," conversations");
+	callHits = []
+	qsoList = []
+	qsoLogged = {}
+	print("\n***** ",fileName," *****\n\tGet ",callsign," conversations")
 	with open(fileName) as inFile:
 		for record in inFile:
 
 			# check for CQ calls
-			cqMatch = cqRegex.match(record);
+			cqMatch = cqRegex.match(record)
 			if cqMatch:
-				gridMap[cqMatch.group(1)] = cqMatch.group(2);
+				gridMap[cqMatch.group(1)] = cqMatch.group(2)
 				
 			else:
 				# check for all callsign matching records
-				callMatch = callRegex.match(record);
-				if callMatch: 
-					message = parseRecord(record);
+				callMatch = callRegex.match(record)
+				if callMatch:
+					message = parseRecord(record)
 					if message:
-						QSL = "";
+						QSL = ""
 						if "Rx" in message["direction"]:
 							# 210426_022730     7.074 Rx FT8     23  0.0 2481 CQ NT6X DM13
-							QSL = mergeRecieved(message);
+							QSL = mergeRecieved(message)
 						else:
 							# 21042_0023045     7.074 Tx FT8      0  0.0 1321 VE2DFY KI5GFU EL09
-							QSL = mergeTransmission(message);
+							QSL = mergeTransmission(message)
 
 						if rrrFinal(message["message"]):
-							callHits.append(genAdifRecord(QSOs[QSL]));
+						    key = ('%s_%s' % (QSL , QSOs[QSL]['time_on']))
+						    if key not in qsoLogged:
+						        qsoLogged[key] = True
+						        callHits.append(genAdifRecord(QSOs[QSL]))
 
-	#print("\n".join(callHits));
 	if len(callHits) > 0:
-		writeQsoLog(callHits);
+		writeQsoLog(callHits)
 
 
 def mergeRecieved(record):
-	QSL = record["call_from"];
-	initSQO(QSL,record);
-	return QSL;
+	QSL = record["call_from"]
+	initSQO(QSL,record)
+	return QSL
 	
 
 def mergeTransmission(record):
-	QSL = record["call_to"];
-	initSQO(QSL,record);
-	return QSL;
+	QSL = record["call_to"]
+	initSQO(QSL,record)
+	return QSL
 
 
 def initSQO(callsign,message):
 	if callsign in QSOs:
-		QSOs[callsign]["time_off"] = message["qso_time"];
-		QSOs[callsign]["qso_date_off"] = message["qso_date"];
+		QSOs[callsign]["time_off"] = message["qso_time"]
+		QSOs[callsign]["qso_date_off"] = message["qso_date"]
 		if "rst_sent" in message:
-			QSOs[callsign]["rst_sent"] = message["rst_sent"];
+			QSOs[callsign]["rst_sent"] = message["rst_sent"]
 		if "rst_rcvd" in message:
-			QSOs[callsign]["rst_rcvd"] = message["rst_rcvd"];
+			QSOs[callsign]["rst_rcvd"] = message["rst_rcvd"]
 		if callsign in gridMap:
-			QSOs[callsign]["gridsquare"] = gridMap[callsign];
+			QSOs[callsign]["gridsquare"] = gridMap[callsign]
 		if station in gridMap:
-			QSOs[callsign]["my_gridsquare"] = gridMap[station];
+			QSOs[callsign]["my_gridsquare"] = gridMap[station]
 	else:
-		QSOs[callsign] = {}
-		QSOs[callsign]["call"] = callsign;
-		QSOs[callsign]["mode"] = message["mode"];
-		QSOs[callsign]["band"] = message["band"];
-		QSOs[callsign]["freq"] = message["freq"];
-		QSOs[callsign]["rst_sent"] = "";
-		QSOs[callsign]["rst_rcvd"] = "";
-		QSOs[callsign]["time_on"] = message["qso_time"];
-		QSOs[callsign]["time_off"] = message["qso_time"];
-		QSOs[callsign]["qso_date"] = message["qso_date"];
-		QSOs[callsign]["qso_date_off"] = message["qso_date"];
-		QSOs[callsign]["station_callsign"] = station;
-		QSOs[callsign]["operator"] = station;
-		QSOs[callsign]["operator"] = station;
-		QSOs[callsign]["gridsquare"] = "";
-		QSOs[callsign]["my_gridsquare"] = "";
+		QSOs[callsign] = {
+		    'call' : callsign,
+		    'mode' : message["mode"],
+		    'band' : message["band"],
+		    'freq' : message["freq"],
+		    'rst_sent' : "",
+		    'rst_rcvd' : "",
+		    'time_on' : message["qso_time"],
+		    'time_off' : message["qso_time"],
+		    'qso_date' : message["qso_date"],
+		    'qso_date_off' : message["qso_date"],
+		    'station_callsign' : station,
+		    'operator' : station,
+		    'gridsquare' : "",
+		    'my_gridsquare' : ""
+		}
 
 def rrrFinal(message):
 	if message == "RRR":
-		return True;
+		return True
 
 	if message == "RR73":
-		return True;
+		return True
 
 	if message == "73":
-		return True;
+		return True
 
-	return False;
+	return False
 		
 def computeBand(freq):
-	parts = freq.split('.');
-	return freqMap[parts[0]];
+	parts = freq.split('.')
+	return freqMap[parts[0]]
 
 
 def parseRecord(record):
-	message = {};
+	message = {}
 
 	# parse record for known components
 	# ex:  210426_022945     7.074 Tx FT8      0  0.0 1321 N1UMJ KI5GFU EL09
 	messageRegEx = re.compile('^([0-9]{6})_([0-9]{6})\s+([\d\.]+)\s([rt]x)\s+([a-z0-9]{3,5}).*\s(\d{2,5})\s+([a-z0-9]{4,7})\s+([a-z0-9]{4,7})\s+([a-z0-9\-\+]+).?',re.IGNORECASE);
-	match = messageRegEx.match(record);
+	match = messageRegEx.match(record)
 	if match:
 		message = {
 			'qso_date': '20'+match.group(1),
@@ -167,25 +171,24 @@ def parseRecord(record):
 			'call_to': match.group(7),
 			'call_from': match.group(8),
 			'message': match.group(9)
-		};
+		}
 	
 		comment = match.group(9).lstrip();	
 
 		if comment.startswith('+') or comment.startswith('-'):
-			message["rst_rcvd"] = comment;  
+			message["rst_rcvd"] = comment
 		if comment.startswith('R+') or comment.startswith('R-'):
-			message["rst_sent"] = comment;
+			message["rst_sent"] = comment
 		
-		return message;
+		return message
 
-	return message;
+	return message
 
 
 def genAdifRecord(QSO):
 	# <call:6>WD5BFH <gridsquare:4>EM26 <mode:3>FT8 <rst_sent:3>-12 <rst_rcvd:3>-19 <qso_date:8>20210515 <time_on:6>165230 <qso_date_off:8>20210515 <time_off:6>165315 <band:3>20m <freq:9>14.076320 <station_callsign:6>KI5GFU <my_gridsquare:4>EL09 <tx_pwr:2>75 <comment:25>FT8  Sent: -12  Rcvd: -19 <operator:6>KI5GFU <eor>
 	# use env or def settings from some extra ADIF fields
-	LOG_PGM = os.environ['LOG_PGM'] if 'LOG_PGM' in os.environ else DEF_LOG_PGM; 
-	QSL_MSG = os.environ['QSL_MSG'] if 'QSL_MSG' in os.environ else DEF_QSL_MSG;   
+	QSL_MSG = os.environ['QSL_MSG'] if 'QSL_MSG' in os.environ else DEF_QSL_MSG
 	# assemble record
 	return '%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s <eor>' % ( 
 		addRecord("call",QSO["call"] ), 
@@ -199,18 +202,19 @@ def genAdifRecord(QSO):
 		addRecord("time_off",QSO["time_off"] ), 
 		addRecord("band",QSO["band"] ), 
 		addRecord("freq",QSO["freq"] ), 
-		addRecord("log_pgm",LOG_PGM),
+		addRecord("log_pgm",loggerId),
 		addRecord("qslmsg",QSL_MSG),
 		addRecord("station_callsign",QSO["station_callsign"] ), 
 		addRecord("my_gridsquare",QSO["my_gridsquare"] ), 
 		addRecord("tx_pwr",txPower), 
 		addRecord("comment",('%s Sent: %s  Rcvd: %s' % (QSO["mode"],QSO["rst_sent"],QSO["rst_rcvd"])) ), 
 		addRecord("operator",QSO["operator"] ), 
-	);
+	)
 
 def writeQsoLog(logEntries):
-	timestamp = datetime.now().strftime("%y%m%d-%H");
-	fname = "./ALL_"+timestamp+".ADI";
+
+	timestamp = datetime.now().strftime("%y%m%d-%H")
+	fname = "./ALL_"+timestamp+".ADI"
 	print("\t* Writing ",len(logEntries)," QSOs to ",fname)
 	f = open(fname, "w")
 	f.write(getAdifHeader())
@@ -219,21 +223,24 @@ def writeQsoLog(logEntries):
 
 
 def getAdifHeader():
-        return """ADIF Export
+    datestamp = datetime.now().strftime("%Y%m%d")
+    template = """ADIF Export
 <adif_ver:5>3.1.1
-<created_timestamp:15>20210401 000001
-<programid:6>WSJT-X
-<programversion:5>2.3.1
+<created_timestamp:15>%s 000001
+<programid:%i>%s
+<programversion:5>1.0.0
 <eoh>
 """
+    return (template % ( datestamp, len(loggerId), loggerId ))
+
 
 def addRecord(name,value):
-	return ('<%s:%i>%s ' % ( name, len(value), value));
+	return ('<%s:%i>%s ' % ( name, len(value), value))
 
 ######################
 #  START 
 ######################
 
-main(sys.argv);
+main(sys.argv)
 
-exit();
+exit()
